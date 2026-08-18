@@ -73,13 +73,22 @@ set -a && source .env && set +a
 ## Setup do dev (outra máquina)
 
 ```bash
-git clone <url-do-repo>
-cd gpu_server
-
 python3.10 -m venv .venv
 source .venv/bin/activate
-
 pip install --upgrade pip       # pip velho + setuptools novo instala "vazio", sem avisar
+```
+
+Instalação rápida, direto do GitHub (sem precisar clonar):
+
+```bash
+pip install "git+https://github.com/Gabriel-Richard-dev/GpuHub.git"
+```
+
+Ou clonando (melhor se você quiser mexer nos exemplos em `examples/`):
+
+```bash
+git clone https://github.com/Gabriel-Richard-dev/GpuHub.git
+cd GpuHub
 pip install -e .
 pip install -e ".[examples]"    # opcional, instala torch pros exemplos
 ```

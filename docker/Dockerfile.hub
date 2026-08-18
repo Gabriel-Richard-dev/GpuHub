@@ -1,0 +1,22 @@
+# Ray head node + dashboard, com passthrough de GPU via nvidia-container-toolkit.
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-venv python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/gpuhub
+COPY pyproject.toml README.md ./
+COPY gpuhub ./gpuhub
+
+# pip do apt do Ubuntu 22.04 é velho demais pro setuptools atual (lê o pacote
+# como "UNKNOWN" e ignora as dependências) — precisa atualizar antes.
+RUN pip3 install --no-cache-dir --upgrade pip
+RUN pip3 install --no-cache-dir .
+
+COPY scripts/start_hub_docker.sh /usr/local/bin/start_hub
+RUN chmod +x /usr/local/bin/start_hub
+
+EXPOSE 6379 8265 10001 8000
+
+CMD ["start_hub"]

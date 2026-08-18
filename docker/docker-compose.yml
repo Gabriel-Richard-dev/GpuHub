@@ -1,0 +1,17 @@
+services:
+  gpuhub:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.hub
+    image: gpuhub:latest
+    container_name: gpuhub
+    restart: unless-stopped
+    # host networking evita ter que mapear as portas dinâmicas do Ray uma a uma
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

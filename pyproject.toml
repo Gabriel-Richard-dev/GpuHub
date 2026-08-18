@@ -1,0 +1,25 @@
+[project]
+name = "gpuhub"
+version = "0.1.0"
+description = "Compartilha a GPU de uma máquina (hub) para treinos remotos de outras máquinas via Ray."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # pinado: Ray exige a mesma versão dos dois lados da conexão (hub e dev)
+    "ray[default]==2.57.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+examples = ["torch"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["gpuhub*"]
+
+[tool.setuptools.package-data]
+"gpuhub.dashboard" = ["static/*"]

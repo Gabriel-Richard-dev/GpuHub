@@ -15,7 +15,7 @@ fi
 VENV_DIR="$HOME/.gpuhub-venv"
 BIN_DIR="$HOME/.local/bin"
 
-python3.10 -m venv "$VENV_DIR"
+python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install --upgrade pip -q
 "$VENV_DIR/bin/pip" install -q "git+https://github.com/Gabriel-Richard-dev/GpuHub.git"
 

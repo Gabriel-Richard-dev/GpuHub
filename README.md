@@ -80,13 +80,16 @@ curl -sO https://raw.githubusercontent.com/Gabriel-Richard-dev/GpuHub/master/scr
 bash setup_dev.sh <ip-do-hub>
 ```
 
-Isso cria um venv em `~/.gpuhub-venv` com o `gpuhub` instalado. Pra usar, em
-qualquer terminal novo:
+Isso cria um venv (escondido, você não precisa mexer nele) e deixa pronto o
+comando `gpuhub-python`, já configurado com o IP do hub. Pra rodar um treino,
+de qualquer pasta, sem ativar nada:
 
 ```bash
-source ~/.gpuhub-venv/bin/activate
-python seu_treino.py
+gpuhub-python seu_treino.py
 ```
+
+(Se der "comando não encontrado", falta `~/.local/bin` no PATH — o próprio
+script avisa e mostra a linha pra colar no `~/.bashrc`.)
 
 ### Setup manual
 

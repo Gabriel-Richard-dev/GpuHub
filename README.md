@@ -72,6 +72,24 @@ set -a && source .env && set +a
 
 ## Setup do dev (outra máquina)
 
+Forma mais rápida pra máquinas do laboratório — um comando, já deixa tudo
+configurado com o IP do hub (não precisa mexer em `.env` depois):
+
+```bash
+curl -sO https://raw.githubusercontent.com/Gabriel-Richard-dev/GpuHub/master/scripts/setup_dev.sh
+bash setup_dev.sh <ip-do-hub>
+```
+
+Isso cria um venv em `~/.gpuhub-venv` com o `gpuhub` instalado. Pra usar, em
+qualquer terminal novo:
+
+```bash
+source ~/.gpuhub-venv/bin/activate
+python seu_treino.py
+```
+
+### Setup manual
+
 ```bash
 python3.10 -m venv .venv
 source .venv/bin/activate

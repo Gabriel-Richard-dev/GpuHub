@@ -1,12 +1,17 @@
-# Ray head node + dashboard, com passthrough de GPU via nvidia-container-toolkit.
+# Ray head node, com passthrough de GPU via nvidia-container-toolkit.
+#
+# Só sobe o cluster Ray — quem manda jobs é o `vigia-gpu-submit`
+# (vigia-ia-lab/vigia/gpuclient.py), via API de Jobs nativa do Ray
+# (dashboard em :8265). Este repo não roda mais nenhum código Python
+# custom, só instala o que o Ray e o vigia-ia-lab precisam.
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 # PY_VERSION segue o requires-python do vigia-ia-lab (fonte da verdade — é
 # quem consome essa GPU compartilhada). Mantenha igual ao PY_VERSION de
-# scripts/setup_dev.sh e scripts/setup_hub.sh: o Ray Client exige a mesma
-# versão major.minor dos dois lados da conexão. Instalamos via `uv` em vez
-# do python3 do apt: a imagem base (Ubuntu 22.04) só oferece 3.10 por
-# padrão, e isso desacopla a versão do Python da versão do Ubuntu da base.
+# scripts/setup_hub.sh: o Ray Client exige a mesma versão major.minor dos
+# dois lados da conexão. Instalamos via `uv` em vez do python3 do apt: a
+# imagem base (Ubuntu 22.04) só oferece 3.10 por padrão, e isso desacopla a
+# versão do Python da versão do Ubuntu da base.
 ARG PY_VERSION=3.11
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -16,19 +21,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
-WORKDIR /opt/gpuhub
-COPY pyproject.toml README.md ./
-COPY gpuhub ./gpuhub
+RUN uv venv --python "${PY_VERSION}" /opt/gpuhub-venv
+ENV PATH="/opt/gpuhub-venv/bin:$PATH"
 
-RUN uv venv --python "${PY_VERSION}" /opt/gpuhub/.venv
-RUN uv pip install --python /opt/gpuhub/.venv/bin/python --no-cache .
-ENV PATH="/opt/gpuhub/.venv/bin:$PATH"
-
-# Deps do vigia-ia-lab pré-instaladas no hub (evita instalar torch/deepface
-# etc. na primeira execução de cada job — quem consome essa GPU compartilhada
-# é o vigia, então o hub já sobe pronto pra ele). Mantenha esta lista igual
-# aos `dependencies` de vigia-ia-lab/pyproject.toml (fonte da verdade).
-RUN uv pip install --python /opt/gpuhub/.venv/bin/python --no-cache \
+# ray[default] pra rodar o head node + Jobs API. O resto é a stack do
+# vigia-ia-lab pré-instalada (evita instalar torch/deepface etc. na
+# primeira execução de cada job). Mantenha esta lista igual aos
+# `dependencies` de vigia-ia-lab/pyproject.toml (fonte da verdade).
+RUN uv pip install --python /opt/gpuhub-venv/bin/python --no-cache \
+        "ray[default]==2.57.0" \
         "numpy==1.26.4" \
         "opencv-python-headless==4.10.0.84" \
         "mediapipe==0.10.18" \
@@ -41,6 +42,6 @@ RUN uv pip install --python /opt/gpuhub/.venv/bin/python --no-cache \
 COPY scripts/start_hub_docker.sh /usr/local/bin/start_hub
 RUN chmod +x /usr/local/bin/start_hub
 
-EXPOSE 6379 8265 10001 8000
+EXPOSE 6379 8265 10001
 
 CMD ["start_hub"]

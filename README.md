@@ -72,6 +72,15 @@ Dockerfile do hub faz o mesmo dentro do container, em vez de depender do
 Se o `requires-python` do vigia-ia-lab mudar, atualize `PY_VERSION` nos três
 lugares acima e rebuilde a imagem do hub (`docker compose up --build -d`).
 
+## Dependências pré-instaladas no hub
+
+O `Dockerfile.hub` já vem com as dependências do `vigia-ia-lab`
+(numpy, opencv-headless, mediapipe, deepface, torch, torchvision,
+facenet-pytorch) instaladas de fábrica — o primeiro job de qualquer dev
+não perde tempo baixando/instalando isso, e ninguém precisa saber que a
+GPU roda em cima de Ray. Se a lista de deps do vigia-ia-lab mudar,
+atualize essa mesma lista no `Dockerfile.hub` e rebuilde a imagem.
+
 ## Configuração
 
 Copie `.env.example` pra `.env` e coloque o IP do hub na rede:

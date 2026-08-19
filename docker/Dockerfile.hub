@@ -11,6 +11,7 @@ ARG PY_VERSION=3.11
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl ca-certificates \
+        libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
@@ -22,6 +23,20 @@ COPY gpuhub ./gpuhub
 RUN uv venv --python "${PY_VERSION}" /opt/gpuhub/.venv
 RUN uv pip install --python /opt/gpuhub/.venv/bin/python --no-cache .
 ENV PATH="/opt/gpuhub/.venv/bin:$PATH"
+
+# Deps do vigia-ia-lab pré-instaladas no hub (evita instalar torch/deepface
+# etc. na primeira execução de cada job — quem consome essa GPU compartilhada
+# é o vigia, então o hub já sobe pronto pra ele). Mantenha esta lista igual
+# aos `dependencies` de vigia-ia-lab/pyproject.toml (fonte da verdade).
+RUN uv pip install --python /opt/gpuhub/.venv/bin/python --no-cache \
+        "numpy==1.26.4" \
+        "opencv-python-headless==4.10.0.84" \
+        "mediapipe==0.10.18" \
+        "deepface>=0.0.93" \
+        "tf-keras>=2.16.0" \
+        "torch" \
+        "torchvision" \
+        "facenet-pytorch"
 
 COPY scripts/start_hub_docker.sh /usr/local/bin/start_hub
 RUN chmod +x /usr/local/bin/start_hub

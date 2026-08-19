@@ -55,10 +55,22 @@ dashboard).
 ## Versão do Python
 
 O Ray Client exige a mesma versão major.minor de Python dos dois lados da
-conexão (patch pode diferir — 3.10.12 e 3.10.21 conversam, 3.10 e 3.14 não).
-A imagem Docker do hub usa Python 3.10 (base `ubuntu22.04`); crie o venv do
-dev também em 3.10 (`python3.10 -m venv .venv`). Se o hub rodar bare-metal em
-vez de Docker, use a versão de Python instalada naquela máquina.
+conexão (patch pode diferir — 3.11.2 e 3.11.9 conversam, 3.11 e 3.14 não).
+A versão usada hoje é a **3.11**, porque é o `requires-python` mínimo do
+`vigia-ia-lab` — quem consome essa GPU compartilhada é quem manda na versão,
+não o gpuhub. Está fixada em um único lugar (variável `PY_VERSION`) em três
+arquivos que precisam ficar em sincronia: `docker/Dockerfile.hub`,
+`scripts/setup_hub.sh` e `scripts/setup_dev.sh`.
+
+`setup_dev.sh` e `setup_hub.sh` usam [`uv`](https://docs.astral.sh/uv/) pra
+criar o venv com essa versão exata, baixando um interpretador isolado —
+funciona igual em qualquer PC do lab independente do Python que a distro já
+tem instalado (não precisa `apt install python3.11`/deadsnakes nem sudo). O
+Dockerfile do hub faz o mesmo dentro do container, em vez de depender do
+`python3` que a imagem base do Ubuntu traz.
+
+Se o `requires-python` do vigia-ia-lab mudar, atualize `PY_VERSION` nos três
+lugares acima e rebuilde a imagem do hub (`docker compose up --build -d`).
 
 ## Configuração
 
@@ -94,7 +106,7 @@ script avisa e mostra a linha pra colar no `~/.bashrc`.)
 ### Setup manual
 
 ```bash
-python3.10 -m venv .venv
+uv venv --python 3.11 .venv     # ou: python3.11 -m venv .venv, se já tiver essa versão instalada
 source .venv/bin/activate
 pip install --upgrade pip       # pip velho + setuptools novo instala "vazio", sem avisar
 ```

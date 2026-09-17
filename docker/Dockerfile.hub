@@ -21,6 +21,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
+# Por padrão o uv guarda o interpretador que ele baixa em /root/.local, e
+# /root é 0700: o venv vira um symlink que só o root consegue seguir, e o
+# container quebra com "bad interpreter: Permission denied" ao rodar como
+# usuário comum. Em /opt todo mundo lê.
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
 RUN uv venv --python "${PY_VERSION}" /opt/gpuhub-venv
 ENV PATH="/opt/gpuhub-venv/bin:$PATH"
 
@@ -39,10 +44,23 @@ RUN uv pip install --python /opt/gpuhub-venv/bin/python --no-cache \
         "torchvision" \
         "facenet-pytorch"
 
+# Os jobs rodam com a identidade de quem sobe o Ray. Como qualquer pessoa
+# autenticada no hub pode submeter código arbitrário, esse alguém não pode ser
+# o root: com network_mode host e /mnt/pesquisa montado, root no container é
+# root na máquina do lab. UID fixo (não "o próximo livre") porque ele precisa
+# casar com o dono de /mnt/pesquisa no host — veja scripts/install_host.sh.
+ARG GPUHUB_UID=2000
+RUN useradd --create-home --uid "${GPUHUB_UID}" --shell /bin/bash gpuhub \
+    && mkdir -p /tmp/ray \
+    && chown gpuhub:gpuhub /tmp/ray
+
 COPY scripts/lib_hub_ip.sh /usr/local/bin/lib_hub_ip.sh
 COPY scripts/start_hub_docker.sh /usr/local/bin/start_hub
 RUN chmod +x /usr/local/bin/start_hub /usr/local/bin/lib_hub_ip.sh
 
+# 8265 e 10001 ficam em localhost (veja start_hub_docker.sh): quem entra de
+# fora entra pelo Caddy, nunca direto no Ray, que não tem autenticação nenhuma.
 EXPOSE 6379 8265 10001
 
+USER gpuhub
 CMD ["start_hub"]

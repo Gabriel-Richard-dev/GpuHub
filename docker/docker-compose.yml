@@ -10,8 +10,14 @@ services:
       - /mnt/pesquisa:/mnt/pesquisa:rw
 
     shm_size: "16gb"
-    # host networking evita ter que mapear as portas dinâmicas do Ray uma a uma
+    # host networking evita ter que mapear as portas dinâmicas do Ray uma a uma.
+    # Efeito colateral que importa: com host networking o ufw vale pro container
+    # (com bridge + ports, o Docker fura o ufw). Se algum dia trocar pra bridge,
+    # as regras de firewall param de valer sem avisar.
     network_mode: host
+    environment:
+      # O Ray nasce em 127.0.0.1: quem entra de fora entra pelo caddy.
+      GPUHUB_DASHBOARD_HOST: "127.0.0.1"
     deploy:
       resources:
         reservations:
@@ -19,3 +25,32 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+
+  # Porta de entrada: TLS + autenticação por conta nomeada na frente da Jobs
+  # API. Sem isso, o hub é execução de código arbitrário pra quem alcança a
+  # porta 8265 — o Ray não tem autenticação própria.
+  caddy:
+    image: caddy:2-alpine
+    container_name: gpuhub-caddy
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - gpuhub
+    environment:
+      # Campus: gpuhub.local + CA interna. Público: o domínio real + um e-mail
+      # (que liga o Let's Encrypt). Definidos em docker/.env — veja .env.example.
+      GPUHUB_SITE_ADDRESS: "${GPUHUB_SITE_ADDRESS:-gpuhub.local}"
+      GPUHUB_TLS: "${GPUHUB_TLS:-internal}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/users.caddy:/etc/caddy/users.caddy:ro
+      # Guarda a CA interna e os certificados. Se este volume sumir, a CA é
+      # regerada e todo mundo precisa baixar o ca.crt de novo.
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+
+volumes:
+  caddy_data:
+  caddy_config:
+  caddy_logs:

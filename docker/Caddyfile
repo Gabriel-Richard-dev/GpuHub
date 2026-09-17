@@ -1,0 +1,50 @@
+# Única porta de entrada do hub. O Ray fica em 127.0.0.1 (start_hub_docker.sh)
+# porque a Jobs API dele não tem autenticação nenhuma: quem a alcança executa
+# código arbitrário na máquina. Aqui em cima é que mora o TLS e o "quem é você".
+{
+	# A API de admin do Caddy reconfigura o proxy em runtime. Nada aqui precisa
+	# dela, e ela seria um segundo alvo na mesma máquina.
+	admin off
+}
+
+# Campus hoje:  GPUHUB_SITE_ADDRESS=gpuhub.local   GPUHUB_TLS=internal
+# Público depois: GPUHUB_SITE_ADDRESS=gpuhub.seu-dominio.br
+#                 GPUHUB_TLS=lab@ifce.edu.br   (vira Let's Encrypt automático)
+# Fora o DNS e a liberação na borda, é só isso que muda entre os dois cenários.
+{$GPUHUB_SITE_ADDRESS:gpuhub.local} {
+	tls {$GPUHUB_TLS:internal}
+
+	# A raiz da CA interna é certificado público, não chave — serve pro pessoal
+	# do lab confiar no hub sem instalar nada na mão. Fica sem auth de propósito:
+	# você precisa dela ANTES de conseguir autenticar. Com Let's Encrypt isso
+	# deixa de ser usado (404 é o esperado).
+	handle /ca.crt {
+		rewrite * /root.crt
+		root * /data/caddy/pki/authorities/local
+		file_server
+	}
+
+	handle {
+		# Contas nomeadas, uma linha por pessoa, hash bcrypt.
+		# Gerencie com: scripts/gpuhub-user.sh add|remove|list
+		basic_auth {
+			import /etc/caddy/users.caddy
+		}
+
+		reverse_proxy 127.0.0.1:8265 {
+			# O submit sobe o working-dir inteiro e o tail de log é websocket:
+			# os dois precisam streamar, não bufferizar.
+			flush_interval -1
+		}
+	}
+
+	# Quem rodou o quê. Com o Ray sozinho os jobs são anônimos; é este log que
+	# amarra cada submit a uma pessoa, e é a base pra cota/prioridade depois.
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 50mb
+			roll_keep 10
+		}
+		format json
+	}
+}

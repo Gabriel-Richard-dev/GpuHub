@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# Cliente do GPU Hub. Envolve o `ray job submit` pra ninguém precisar decorar
+# endereço, credencial, caminho da CA e as flags que fazem a fila funcionar.
+#
+#   gpuhub login <nome>          configura esta máquina (uma vez)
+#   gpuhub submit <script.py>    manda o treino pro hub
+#   gpuhub queue                 o que está rodando e o que está esperando
+#   gpuhub logs <id>             acompanha um job
+#   gpuhub stop <id>             mata um job
+#
+# Ele é de propósito uma casca fina: tudo que ele faz dá pra fazer na mão com
+# `ray job submit`. Ter a casca é o que permite mudar endereço, auth ou até o
+# scheduler por baixo sem reensinar o laboratório inteiro.
+set -euo pipefail
+
+CONF_DIR="${GPUHUB_CONFIG_DIR:-$HOME/.gpuhub}"
+CONF="$CONF_DIR/config"
+CREDS="$CONF_DIR/credentials"
+CA="$CONF_DIR/ca.crt"
+DEFAULT_URL="https://gpuhub.local"
+
+die() { echo "erro: $*" >&2; exit 1; }
+usage() { sed -n '2,14p' "$0" | sed 's/^# \?//' >&2; exit 1; }
+
+need_ray() {
+  command -v ray >/dev/null || die "o comando \`ray\` não está no PATH.
+  O hub exige Python 3.11 dos dois lados. Na sua máquina:
+    uv venv --python 3.11 ~/.gpuhub-venv
+    uv pip install --python ~/.gpuhub-venv/bin/python 'ray[default]==2.57.0'
+    export PATH=\"\$HOME/.gpuhub-venv/bin:\$PATH\""
+}
+
+load_conf() {
+  [ -f "$CONF" ] || die "esta máquina ainda não está configurada. Rode: gpuhub login <seu-nome>"
+  # shellcheck disable=SC1090
+  . "$CONF"
+  [ -f "$CREDS" ] || die "credencial não encontrada. Rode: gpuhub login <seu-nome>"
+}
+
+# O que vai em toda chamada: quem você é, e em qual CA confiar.
+auth_args() {
+  local basic
+  basic="$(base64 -w0 < "$CREDS" 2>/dev/null || base64 < "$CREDS" | tr -d '\n')"
+  AUTH_ARGS=(--address "$GPUHUB_URL" --headers "{\"Authorization\": \"Basic ${basic}\"}")
+  # Com Let's Encrypt (hub público) a CA do sistema já basta e o arquivo não existe.
+  [ -f "$CA" ] && AUTH_ARGS+=(--verify "$CA")
+}
+
+cmd_login() {
+  local name="${1:-}" url="${GPUHUB_URL:-$DEFAULT_URL}"
+  [ -n "$name" ] || usage
+  [ -n "${2:-}" ] && url="$2"
+
+  printf 'Senha de %s no hub: ' "$name" >&2
+  local pass; read -rs pass; echo >&2
+  [ -n "$pass" ] || die "senha vazia"
+
+  mkdir -p "$CONF_DIR"; chmod 700 "$CONF_DIR"
+
+  # A CA interna é servida sem autenticação de propósito: você precisa dela
+  # antes de ter como se autenticar. Num hub com certificado público isso
+  # retorna 404 e a gente simplesmente não usa arquivo de CA.
+  local ca_tmp; ca_tmp="$(mktemp)"
+  if curl -fsSk "$url/ca.crt" -o "$ca_tmp" 2>/dev/null && openssl x509 -in "$ca_tmp" -noout >/dev/null 2>&1; then
+    mv "$ca_tmp" "$CA"; chmod 644 "$CA"
+    echo "CA interna do hub salva em $CA"
+  else
+    rm -f "$ca_tmp" "$CA"
+    echo "Hub usa certificado público — sem CA própria pra instalar."
+  fi
+
+  # Só grava depois de provar que a credencial vale, pra ninguém sair com uma
+  # config quebrada achando que está tudo certo.
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' ${CA:+--cacert "$CA"} -u "$name:$pass" "$url/api/version" || true)"
+  case "$code" in
+    200) : ;;
+    401) die "usuário ou senha incorretos." ;;
+    000) die "não consegui falar com $url. O hub está no ar? Você está na rede do campus?" ;;
+    *)   die "resposta inesperada do hub: HTTP $code" ;;
+  esac
+
+  printf '%s:%s' "$name" "$pass" > "$CREDS"; chmod 600 "$CREDS"
+  printf 'GPUHUB_URL=%s\nGPUHUB_USER=%s\n' "$url" "$name" > "$CONF"; chmod 600 "$CONF"
+  echo "Pronto, $name. Manda um treino com: gpuhub submit seu_treino.py"
+}
+
+cmd_submit() {
+  local script="${1:-}"
+  [ -n "$script" ] || usage
+  [ -f "$script" ] || die "não achei o arquivo '$script'"
+  shift
+  need_ray; load_conf; auth_args
+
+  local dir base
+  dir="$(cd "$(dirname "$script")" && pwd)"
+  base="$(basename "$script")"
+
+  # O working-dir inteiro sobe por HTTP a cada submit. Dataset aqui dentro é o
+  # erro mais comum: o envio demora, e o Ray recusa pacote grande demais.
+  local size_mb
+  size_mb="$(du -sm "$dir" 2>/dev/null | cut -f1)"
+  if [ "${size_mb:-0}" -gt 50 ]; then
+    echo "Aviso: $dir tem ${size_mb}MB e vai inteiro pro hub a cada submit." >&2
+    echo "       Dados grandes ficam em /mnt/pesquisa no hub, não na pasta do código." >&2
+  fi
+
+  # num-gpus é o que faz a fila existir: sem ele dois treinos dividem a mesma
+  # GPU e os dois ficam lentos (ou estouram a memória) em vez de um esperar.
+  # metadata é quem amarra o job a uma pessoa na hora de olhar a fila.
+  ray job submit "${AUTH_ARGS[@]}" \
+    --entrypoint-num-gpus="${GPUHUB_GPUS:-1}" \
+    --metadata-json "{\"user\": \"${GPUHUB_USER}\", \"host\": \"$(hostname)\"}" \
+    --working-dir "$dir" \
+    -- python "$base" "$@"
+}
+
+cmd_passthrough() {
+  local sub="$1"; shift
+  need_ray; load_conf; auth_args
+  ray job "$sub" "${AUTH_ARGS[@]}" "$@"
+}
+
+case "${1:-}" in
+  login)  shift; cmd_login "$@" ;;
+  submit) shift; cmd_submit "$@" ;;
+  queue)  shift; cmd_passthrough list "$@" ;;
+  logs)   shift; cmd_passthrough logs "$@" ;;
+  stop)   shift; cmd_passthrough stop "$@" ;;
+  status) shift; cmd_passthrough status "$@" ;;
+  *)      usage ;;
+esac

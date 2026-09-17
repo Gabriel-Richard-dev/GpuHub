@@ -34,6 +34,20 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+echo "== 0. arquivo de contas =="
+# O compose monta este arquivo. Ele é gitignored (guarda hashes de senha), então
+# num clone novo ele não existe — e o Docker criaria um DIRETÓRIO no lugar, que
+# faz o Caddy falhar no import. Criar vazio aqui evita isso.
+USERS_FILE="$REPO_DIR/docker/caddy/users.caddy"
+if [ -f "$USERS_FILE" ]; then
+  echo "  já existe ($(grep -c '^[a-z]' "$USERS_FILE" || echo 0) conta(s))"
+else
+  mkdir -p "$(dirname "$USERS_FILE")"
+  printf '# Contas do hub. Gerado por scripts/gpuhub-user.sh — nao edite na mao.\n' > "$USERS_FILE"
+  chmod 600 "$USERS_FILE"
+  echo "  criado vazio em $USERS_FILE"
+fi
+
 echo "== 1. grupo gpuhub e operadores =="
 getent group gpuhub >/dev/null || { groupadd gpuhub; echo "grupo gpuhub criado"; }
 if [ -n "$USERS" ]; then

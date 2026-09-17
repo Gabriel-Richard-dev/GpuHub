@@ -24,6 +24,23 @@
 		file_server
 	}
 
+	# O hub serve o próprio instalador e o próprio cliente. Sem isso, montar
+	# uma máquina nova depende de clonar o repo ou de o GitHub estar em dia com
+	# o que está rodando aqui — e foi assim que o setup de dev do lab ficou
+	# quebrado sem ninguém perceber. Sem auth pelo mesmo motivo do ca.crt: é o
+	# que você roda ANTES de ter credencial. Os dois são script público, não
+	# segredo.
+	handle /install {
+		rewrite * /scripts/install_dev.sh
+		root * /srv/pub
+		file_server
+	}
+	handle /gpuhub {
+		rewrite * /bin/gpuhub
+		root * /srv/pub
+		file_server
+	}
+
 	handle {
 		# Contas nomeadas, uma linha por pessoa, hash bcrypt.
 		# Gerencie com: scripts/gpuhub-user.sh add|remove|list

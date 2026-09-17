@@ -105,10 +105,28 @@ cmd_submit() {
     echo "       Dados grandes ficam em /mnt/pesquisa no hub, não na pasta do código." >&2
   fi
 
+  # Dependência que o hub não traz pré-instalada entra por aqui. O Ray monta um
+  # ambiente só pra este job em cima do que o container já tem — não suja o hub
+  # nem afeta o treino de outra pessoa. (Instalar com `docker exec ... pip
+  # install` parece resolver e some no próximo restart do container.)
+  local env_args=() reqs="$dir/requirements.txt" pkgs
+  if [ -f "$reqs" ]; then
+    pkgs="$(python3 -c '
+import json, sys
+pkgs = []
+for line in open(sys.argv[1], encoding="utf-8"):
+    line = line.split("#")[0].strip()
+    if line:
+        pkgs.append(line)
+print(json.dumps({"pip": pkgs}))' "$reqs")"
+    env_args=(--runtime-env-json "$pkgs")
+    echo "Dependências extras detectadas: requirements.txt" >&2
+  fi
+
   # num-gpus é o que faz a fila existir: sem ele dois treinos dividem a mesma
   # GPU e os dois ficam lentos (ou estouram a memória) em vez de um esperar.
   # metadata é quem amarra o job a uma pessoa na hora de olhar a fila.
-  ray job submit "${AUTH_ARGS[@]}" \
+  ray job submit "${AUTH_ARGS[@]}" "${env_args[@]}" \
     --entrypoint-num-gpus="${GPUHUB_GPUS:-1}" \
     --metadata-json "{\"user\": \"${GPUHUB_USER}\", \"host\": \"$(hostname)\"}" \
     --working-dir "$dir" \

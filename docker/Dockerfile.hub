@@ -29,12 +29,22 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
 RUN uv venv --python "${PY_VERSION}" /opt/gpuhub-venv
 ENV PATH="/opt/gpuhub-venv/bin:$PATH"
 
+# `pip` é instalado de propósito: o `uv venv` cria o ambiente SEM pip, e o Ray
+# monta o runtime_env de um job derivando um virtualenv daqui e chamando
+# `python -m pip`. Sem isto, todo job com requirements.txt morre com
+# "No module named pip" — que é o que empurra as pessoas a instalar pacote na
+# mão dentro do container (e perder tudo no próximo restart).
+#
 # ray[default] pra rodar o head node + Jobs API. O resto é a stack do
 # vigia-ia-lab pré-instalada (evita instalar torch/deepface etc. na
 # primeira execução de cada job). Mantenha esta lista igual aos
 # `dependencies` de vigia-ia-lab/pyproject.toml (fonte da verdade).
+# onnx/onnxscript estavam sendo instalados na mão com `docker exec ... pip
+# install`: funciona até o container ser recriado, e aí somem sem aviso. O
+# lugar de dependência do hub é aqui.
 RUN uv pip install --python /opt/gpuhub-venv/bin/python --no-cache \
         "ray[default]==2.57.0" \
+        "pip" \
         "numpy==1.26.4" \
         "opencv-python-headless==4.10.0.84" \
         "mediapipe==0.10.18" \
@@ -42,7 +52,9 @@ RUN uv pip install --python /opt/gpuhub-venv/bin/python --no-cache \
         "tf-keras>=2.16.0" \
         "torch" \
         "torchvision" \
-        "facenet-pytorch"
+        "facenet-pytorch" \
+        "onnx" \
+        "onnxscript"
 
 # Os jobs rodam com a identidade de quem sobe o Ray. Como qualquer pessoa
 # autenticada no hub pode submeter código arbitrário, esse alguém não pode ser

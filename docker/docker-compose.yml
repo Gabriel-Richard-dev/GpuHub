@@ -44,6 +44,10 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy/users.caddy:/etc/caddy/users.caddy:ro
+      # Servidos sem autenticação em /install e /gpuhub: é como uma máquina
+      # nova do lab se prepara antes de ter credencial.
+      - ../bin:/srv/pub/bin:ro
+      - ../scripts:/srv/pub/scripts:ro
       # Guarda a CA interna e os certificados. Se este volume sumir, a CA é
       # regerada e todo mundo precisa baixar o ca.crt de novo.
       - caddy_data:/data

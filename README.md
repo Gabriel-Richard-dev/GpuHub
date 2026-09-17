@@ -37,6 +37,17 @@ Fica disponível na rede:
 | Ray client            | `ray://<ip-do-hub>:10001`   |
 | Ray dashboard (Jobs)  | `http://<ip-do-hub>:8265`   |
 
+O hub descobre sozinho em qual IP se anunciar (`scripts/lib_hub_ip.sh`): ele
+espera a rede subir e pega o IP da interface que tem a rota default,
+ignorando as bridges do Docker. Isso importa porque o Ray **fixa esse
+endereço no start** — se ele subir antes da rede, o cluster nasce bindado na
+`docker0` e fica invisível pra LAN sem dar erro nenhum. Se precisar forçar um
+endereço, use `GPUHUB_HOST=<ip>` no `docker-compose.yml`.
+
+O IP atual (`10.50.21.14`) vem de **DHCP**, e a máquina tem cabo e Wi-Fi —
+trocar de interface muda o endereço e exige reiniciar o container pro Ray
+rebindar. Reserva de DHCP no roteador do lab (ou IP fixo) resolve de vez.
+
 ```bash
 docker compose logs -f gpuhub   # logs
 docker compose down             # parar
@@ -94,6 +105,19 @@ uv venv --python 3.11 .venv && uv pip install -e .
 vigia-gpu-submit train/seu_treino.py
 ```
 
+Sem o vigia-ia-lab, o mesmo efeito na mão (venv com Python 3.11):
+
+```bash
+export RAY_ADDRESS=http://10.50.21.14:8265
+ray job submit --entrypoint-num-gpus=1 --working-dir . -- python train/seu_treino.py
+```
+
+`--entrypoint-num-gpus=1` é o que faz a fila funcionar — sem isso dois treinos
+disputam a mesma GPU em vez de esperar a vez. E **dataset não vai no
+`--working-dir`**: ele é zipado e enviado por HTTP a cada submit (limite
+prático ~100 MB). Dados grandes ficam em `/mnt/pesquisa`, que o container já
+monta, e o script lê o caminho de lá.
+
 Ou pelo VSCode: abre o script, aperta F5, escolhe "Treinar no GPU Hub" —
 já configurado em `.vscode/launch.json` no vigia-ia-lab. Detalhes em
 `vigia/gpuclient.py` do vigia-ia-lab.
@@ -103,7 +127,8 @@ já configurado em `.vscode/launch.json` no vigia-ia-lab. Detalhes em
 ```
 scripts/
   setup_hub.sh, start_hub.sh, stop_hub.sh   # caminho bare-metal
-  start_hub_docker.sh                         # entrypoint do container
+  start_hub_docker.sh                       # entrypoint do container
+  lib_hub_ip.sh                             # descoberta do IP, usada pelos dois
 docker/
   Dockerfile.hub, docker-compose.yml
 ```

@@ -39,8 +39,9 @@ RUN uv pip install --python /opt/gpuhub-venv/bin/python --no-cache \
         "torchvision" \
         "facenet-pytorch"
 
+COPY scripts/lib_hub_ip.sh /usr/local/bin/lib_hub_ip.sh
 COPY scripts/start_hub_docker.sh /usr/local/bin/start_hub
-RUN chmod +x /usr/local/bin/start_hub
+RUN chmod +x /usr/local/bin/start_hub /usr/local/bin/lib_hub_ip.sh
 
 EXPOSE 6379 8265 10001
 

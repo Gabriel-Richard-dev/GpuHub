@@ -6,6 +6,10 @@ services:
     image: gpuhub:latest
     container_name: gpuhub
     restart: unless-stopped
+    volumes:
+      - /mnt/pesquisa:/mnt/pesquisa:rw
+
+    shm_size: "16gb"
     # host networking evita ter que mapear as portas dinâmicas do Ray uma a uma
     network_mode: host
     deploy:

@@ -6,7 +6,10 @@ set -euo pipefail
 VENV_DIR="${GPUHUB_VENV:-$HOME/.gpuhub/venv}"
 source "$VENV_DIR/bin/activate"
 
-HUB_IP="${GPUHUB_HOST:-$(hostname -I | awk '{print $1}')}"
+# shellcheck source=lib_hub_ip.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib_hub_ip.sh"
+
+HUB_IP="$(gpuhub_detect_ip)"
 
 echo "Iniciando Ray head node em $HUB_IP ..."
 echo "Ray client:    ray://$HUB_IP:10001"
@@ -20,4 +23,5 @@ exec ray start --head \
   --dashboard-host=0.0.0.0 \
   --dashboard-port=8265 \
   --num-gpus=1 \
+  --disable-usage-stats \
   --block

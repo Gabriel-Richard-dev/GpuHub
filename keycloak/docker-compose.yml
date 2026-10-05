@@ -31,7 +31,7 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
       # Campus/VPN hoje: issuer = https://10.50.21.14/auth/realms/lab.
       # Público depois: troca só esta linha pro DNS público (+ restart).
-      KC_HOSTNAME: https://10.50.21.14/auth
+      KC_HOSTNAME: https://gpuhub.local/auth
       KC_HTTP_RELATIVE_PATH: /auth
       KC_HTTP_ENABLED: "true"            # TLS termina no Caddy
       KC_PROXY_HEADERS: xforwarded       # confia no X-Forwarded-* do Caddy

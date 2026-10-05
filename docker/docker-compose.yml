@@ -7,7 +7,11 @@ services:
     container_name: gpuhub
     restart: unless-stopped
     volumes:
-      - /mnt/pesquisa:/mnt/pesquisa:rw
+      - /data:/data:rw
+      - /data/pesquisa:/mnt/pesquisa:rw
+    group_add:
+      - "1009"   # lab
+      - "1003"   # vigia
 
     shm_size: "16gb"
     # host networking evita ter que mapear as portas dinâmicas do Ray uma a uma.

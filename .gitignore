@@ -8,3 +8,4 @@ build/
 dist/
 .env
 docker/caddy/users.caddy
+keycloak/.env

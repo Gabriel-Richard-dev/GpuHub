@@ -1,0 +1,48 @@
+# Keycloak (IdP central do lab) + Postgres, ao lado do hub.
+# Só escuta em 127.0.0.1:8080 — quem entra de fora entra pelo Caddy (/auth).
+# Postgres não publica porta: nunca fica na LAN.
+#   docker compose up -d
+#   ver: docker compose logs -f keycloak
+services:
+  kc-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD}
+    volumes:
+      - kc-db-data:/var/lib/postgresql/data
+    networks: [kc-net]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8
+    restart: unless-stopped
+    command: start --import-realm
+    depends_on: [kc-db]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://kc-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD}
+      # Credenciais de bootstrap: temporárias. Depois do 1º boot criamos um
+      # admin de verdade e removemos estas duas linhas (+ restart).
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+      # Campus/VPN hoje: issuer = https://10.50.21.14/auth/realms/lab.
+      # Público depois: troca só esta linha pro DNS público (+ restart).
+      KC_HOSTNAME: https://10.50.21.14/auth
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HTTP_ENABLED: "true"            # TLS termina no Caddy
+      KC_PROXY_HEADERS: xforwarded       # confia no X-Forwarded-* do Caddy
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./realm:/opt/keycloak/data/import:ro
+    ports:
+      - "127.0.0.1:8080:8080"           # só loopback; o Caddy alcança aqui
+    networks: [kc-net]
+
+volumes:
+  kc-db-data: {}
+networks:
+  kc-net: {}

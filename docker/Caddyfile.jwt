@@ -1,0 +1,72 @@
+# Caddy do hub — valida JWT do Keycloak na frente da Jobs API do Ray.
+# Swap do basic_auth -> jwtauth. Mantém os 3 caminhos públicos pré-credencial.
+{
+	admin off
+}
+
+{$GPUHUB_SITE_ADDRESS:gpuhub.local} {
+	tls {$GPUHUB_TLS:internal}
+
+	# --- pré-credencial, SEM auth (inalterado) ---
+	# A raiz da CA interna é cert público: você precisa dela ANTES de autenticar.
+	handle /ca.crt {
+		rewrite * /root.crt
+		root * /data/caddy/pki/authorities/local
+		file_server
+	}
+	handle /install {
+		rewrite * /scripts/install_dev.sh
+		root * /srv/pub
+		file_server
+	}
+	handle /gpuhub {
+		rewrite * /bin/gpuhub
+		root * /srv/pub
+		file_server
+	}
+
+	# --- NOVO: Keycloak faz a própria auth; nada de JWT aqui ---
+	handle /auth/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# --- resto: valida o Bearer JWT do Keycloak, checa papel por método, proxy pro Ray ---
+	handle {
+		route {
+			jwtauth {
+				# JWKS pela loopback (evita loop de TLS); iss/aud validam o nome público.
+				jwk_url http://127.0.0.1:8080/auth/realms/lab/protocol/openid-connect/certs
+				issuer_whitelist https://gpuhub.local/auth/realms/lab
+				audience_whitelist gpuhub-api
+				meta_claims "realm_access.roles->roles"
+			}
+
+			# token válido mas sem nenhum papel do hub -> 403 (fail-closed)
+			@norole {
+				not vars_regexp {http.auth.user.roles} (^|,)(admin|professor|pesquisador|viewer)(,|$)
+			}
+			respond @norole "forbidden: conta sem papel no hub" 403
+
+			# escrita (submit/stop/upload) exige papel executor; viewer só lê.
+			# PUT /api/packages = upload do working-dir -> conta como escrita.
+			@denywrite {
+				method POST PUT DELETE PATCH
+				not vars_regexp {http.auth.user.roles} (^|,)(admin|professor|pesquisador)(,|$)
+			}
+			respond @denywrite "forbidden: papel somente-leitura" 403
+
+			reverse_proxy 127.0.0.1:8265 {
+				flush_interval -1
+			}
+		}
+	}
+
+	# quem submeteu o quê (base pra cota/prioridade depois)
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 50mb
+			roll_keep 10
+		}
+		format json
+	}
+}

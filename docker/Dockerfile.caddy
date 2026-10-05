@@ -1,0 +1,9 @@
+# Caddy do hub com validacao de JWT do Keycloak (ggicci/caddy-jwt).
+# caddy:2-alpine nao tem validador JWT -> build via xcaddy.
+# caddy-jwt v1.1.1 exige Caddy >= 2.10.2 + Go 1.25 -> base 2.11 + GOTOOLCHAIN=auto.
+# (rate-limit entra na fase de publico; aqui so o que o cutover de auth precisa.)
+FROM caddy:2.11-builder AS build
+ENV GOTOOLCHAIN=auto
+RUN xcaddy build --with github.com/ggicci/caddy-jwt@v1.1.1
+FROM caddy:2.11-alpine
+COPY --from=build /usr/bin/caddy /usr/bin/caddy

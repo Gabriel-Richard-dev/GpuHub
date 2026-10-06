@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+# Cliente do GPU Hub. Login via Keycloak (device-flow), jobs via Ray Jobs API.
+#
+#   gpuhub login [url]           autentica esta maquina no hub (uma vez)
+#   gpuhub submit <script.py>    manda o treino pro hub
+#   gpuhub queue                 o que roda e o que espera
+#   gpuhub logs <id>             acompanha um job
+#   gpuhub stop <id>             mata um job
+#   gpuhub whoami                mostra quem voce esta logado
+#
+# Casca fina sobre `ray job submit`. A autenticacao e um token OIDC do
+# Keycloak (device authorization grant): o `login` abre uma URL pra voce
+# aprovar no navegador; depois cada comando manda Authorization: Bearer.
+set -euo pipefail
+
+CONF_DIR="${GPUHUB_CONFIG_DIR:-$HOME/.gpuhub}"
+CONF="$CONF_DIR/config"
+TOKF="$CONF_DIR/token.json"
+CA="$CONF_DIR/ca.crt"
+DEFAULT_URL="https://gpuhub.local"
+OIDC_PATH="/auth/realms/lab/protocol/openid-connect"
+CLIENT_ID="gpuhub-cli"
+
+die()   { echo "erro: $*" >&2; exit 1; }
+usage() { sed -n '2,15p' "$0" | sed 's/^# \?//' >&2; exit 1; }
+
+# curl que confia na CA interna do hub quando ela existe (Let's Encrypt: usa a do sistema)
+ccurl() { if [ -f "$CA" ]; then curl --cacert "$CA" "$@"; else curl "$@"; fi; }
+
+# le um campo string de um JSON vindo do stdin
+pyget() { python3 -c 'import sys,json
+try: d=json.load(sys.stdin)
+except Exception: d={}
+v=d.get(sys.argv[1],"") if isinstance(d,dict) else ""
+print(v if v is not None else "")' "$1"; }
+
+need_ray() {
+  command -v ray >/dev/null || die "o comando \`ray\` nao esta no PATH.
+  Instale o cliente (uma vez):
+    uv venv --python 3.11 ~/.gpuhub-venv
+    uv pip install --python ~/.gpuhub-venv/bin/python 'ray[default]==2.57.0'
+    export PATH=\"\$HOME/.gpuhub-venv/bin:\$PATH\""
+}
+
+load_conf() {
+  [ -f "$CONF" ] || die "esta maquina ainda nao esta configurada. Rode: gpuhub login"
+  # shellcheck disable=SC1090
+  . "$CONF"
+}
+
+save_tok() { # $1 = resposta JSON do token endpoint
+  python3 -c 'import sys,json,time
+d=json.loads(sys.argv[1]); now=int(time.time())
+json.dump({"access_token":d["access_token"],
+           "refresh_token":d.get("refresh_token",""),
+           "exp":now+int(d.get("expires_in",300))-30}, open(sys.argv[2],"w"))' "$1" "$TOKF"
+  chmod 600 "$TOKF"
+}
+
+# imprime um access token valido, renovando pelo refresh token se preciso
+get_token() {
+  [ -f "$TOKF" ] || die "nao autenticado. Rode: gpuhub login"
+  local now exp; now=$(date +%s)
+  exp=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("exp",0))' "$TOKF")
+  if [ "$now" -lt "$exp" ]; then
+    python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["access_token"])' "$TOKF"; return
+  fi
+  local rt; rt=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("refresh_token",""))' "$TOKF")
+  [ -n "$rt" ] || die "sessao expirou. Rode: gpuhub login"
+  local resp; resp="$(ccurl -sS -d grant_type=refresh_token -d client_id=$CLIENT_ID -d refresh_token="$rt" "$GPUHUB_URL$OIDC_PATH/token")"
+  [ -n "$(echo "$resp" | pyget access_token)" ] || die "sessao expirou. Rode: gpuhub login"
+  save_tok "$resp"
+  python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["access_token"])' "$TOKF"
+}
+
+auth_args() {
+  local t; t="$(get_token)"
+  AUTH_ARGS=(--address "$GPUHUB_URL" --headers "{\"Authorization\": \"Bearer ${t}\"}")
+  [ -f "$CA" ] && AUTH_ARGS+=(--verify "$CA")
+}
+
+cmd_login() {
+  local url="${GPUHUB_URL:-$DEFAULT_URL}"
+  [ -n "${1:-}" ] && url="$1"
+  mkdir -p "$CONF_DIR"; chmod 700 "$CONF_DIR"
+
+  # CA interna: servida sem auth de proposito (voce precisa dela antes de confiar
+  # no hub). Com Let's Encrypt isso da 404 e a gente usa a CA do sistema.
+  local ca_tmp; ca_tmp="$(mktemp)"
+  if curl -fsSk "$url/ca.crt" -o "$ca_tmp" 2>/dev/null && openssl x509 -in "$ca_tmp" -noout >/dev/null 2>&1; then
+    mv "$ca_tmp" "$CA"; chmod 644 "$CA"; echo "CA interna do hub salva em $CA"
+  else
+    rm -f "$ca_tmp" "$CA"; echo "Hub usa certificado publico (sem CA propria)."
+  fi
+
+  local OIDC="$url$OIDC_PATH"
+  local dev; dev="$(ccurl -fsS -d client_id=$CLIENT_ID -d scope=openid "$OIDC/auth/device" 2>/dev/null)" \
+    || die "nao consegui falar com $url. O hub esta no ar? Voce alcanca a rede dele?"
+  local dc uc vuri iv
+  dc="$(echo "$dev" | pyget device_code)"
+  uc="$(echo "$dev" | pyget user_code)"
+  vuri="$(echo "$dev" | pyget verification_uri_complete)"
+  [ -n "$vuri" ] || vuri="$(echo "$dev" | pyget verification_uri)"
+  iv="$(echo "$dev" | pyget interval)"; [ -n "$iv" ] || iv=5
+  [ -n "$dc" ] || die "resposta inesperada do Keycloak no device endpoint"
+
+  echo
+  echo "  Abra no navegador:  $vuri"
+  echo "  Codigo:             $uc"
+  echo
+  echo "Aguardando voce aprovar..."
+  while :; do
+    sleep "$iv"
+    local resp; resp="$(ccurl -sS -d grant_type=urn:ietf:params:oauth:grant-type:device_code -d client_id=$CLIENT_ID -d device_code="$dc" "$OIDC/token")"
+    if [ -n "$(echo "$resp" | pyget access_token)" ]; then save_tok "$resp"; break; fi
+    case "$(echo "$resp" | pyget error)" in
+      authorization_pending) : ;;
+      slow_down) iv=$((iv+5)) ;;
+      "") : ;;
+      *) die "login falhou: $(echo "$resp" | pyget error_description)" ;;
+    esac
+  done
+  printf 'GPUHUB_URL=%s\n' "$url" > "$CONF"; chmod 600 "$CONF"
+  echo "Pronto. Manda um treino com: gpuhub submit seu_treino.py"
+}
+
+token_user() {
+  python3 -c 'import json,sys,base64
+t=json.load(open(sys.argv[1]))["access_token"]; p=t.split(".")[1]; p+="="*(-len(p)%4)
+print(json.loads(base64.urlsafe_b64decode(p)).get("preferred_username",""))' "$TOKF"
+}
+
+cmd_whoami() {
+  load_conf; get_token >/dev/null
+  python3 -c 'import json,sys,base64
+t=json.load(open(sys.argv[1]))["access_token"]; p=t.split(".")[1]; p+="="*(-len(p)%4)
+d=json.loads(base64.urlsafe_b64decode(p))
+print("usuario:", d.get("preferred_username") or d.get("sub"))
+print("papeis :", [r for r in d.get("realm_access",{}).get("roles",[]) if r in ("admin","professor","pesquisador","viewer")])' "$TOKF"
+  echo "hub    : $GPUHUB_URL"
+}
+
+cmd_submit() {
+  local script="${1:-}"
+  [ -n "$script" ] || usage
+  [ -f "$script" ] || die "nao achei o arquivo '$script'"
+  shift
+  need_ray; load_conf; auth_args
+  local me; me="$(token_user)"
+
+  local dir base
+  dir="$(cd "$(dirname "$script")" && pwd)"
+  base="$(basename "$script")"
+
+  local size_mb
+  size_mb="$(du -sm "$dir" 2>/dev/null | cut -f1)"
+  if [ "${size_mb:-0}" -gt 50 ]; then
+    echo "Aviso: $dir tem ${size_mb}MB e vai inteiro pro hub a cada submit." >&2
+    echo "       Dados grandes ficam em /data no hub, nao na pasta do codigo." >&2
+  fi
+
+  local env_args=() reqs="$dir/requirements.txt" pkgs
+  if [ -f "$reqs" ]; then
+    pkgs="$(python3 -c '
+import json, sys
+pkgs = []
+for line in open(sys.argv[1], encoding="utf-8"):
+    line = line.split("#")[0].strip()
+    if line:
+        pkgs.append(line)
+print(json.dumps({"pip": pkgs}))' "$reqs")"
+    env_args=(--runtime-env-json "$pkgs")
+    echo "Dependencias extras detectadas: requirements.txt" >&2
+  fi
+
+  ray job submit "${AUTH_ARGS[@]}" "${env_args[@]}" \
+    --entrypoint-num-gpus="${GPUHUB_GPUS:-1}" \
+    --metadata-json "{\"user\": \"${me}\", \"host\": \"$(hostname)\"}" \
+    --working-dir "$dir" \
+    -- python "$base" "$@"
+}
+
+cmd_passthrough() {
+  local sub="$1"; shift
+  need_ray; load_conf; auth_args
+  ray job "$sub" "${AUTH_ARGS[@]}" "$@"
+}
+
+case "${1:-}" in
+  login)  shift; cmd_login "$@" ;;
+  whoami) shift; cmd_whoami "$@" ;;
+  submit) shift; cmd_submit "$@" ;;
+  queue)  shift; cmd_passthrough list "$@" ;;
+  logs)   shift; cmd_passthrough logs "$@" ;;
+  stop)   shift; cmd_passthrough stop "$@" ;;
+  status) shift; cmd_passthrough status "$@" ;;
+  *)      usage ;;
+esac

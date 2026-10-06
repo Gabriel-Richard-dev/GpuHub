@@ -27,6 +27,11 @@
 
 	# --- NOVO: Keycloak faz a própria auth; nada de JWT aqui ---
 	handle /auth/* {
+		# Console admin e realm master NAO vão pela porta da frente: administração
+		# só por loopback (kcadm) ou túnel SSH. Fecha um alvo a mais, sobretudo
+		# quando isso virar público.
+		@kcadmin path /auth/admin/* /auth/realms/master /auth/realms/master/*
+		respond @kcadmin "admin console indisponivel por aqui" 403
 		reverse_proxy 127.0.0.1:8080
 	}
 

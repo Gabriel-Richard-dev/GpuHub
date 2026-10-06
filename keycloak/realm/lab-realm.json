@@ -12,29 +12,9 @@
       { "name": "admin",       "description": "Administra a plataforma" },
       { "name": "professor",   "description": "Cria projetos, supervisiona, executa jobs" },
       { "name": "pesquisador", "description": "Executa jobs e usa a GPU" },
-      { "name": "viewer",      "description": "Só leitura: ve status/logs, nao executa" }
+      { "name": "viewer",      "description": "So leitura: ve status/logs, nao executa" }
     ]
   },
-  "clientScopes": [
-    {
-      "name": "gpuhub-api",
-      "protocol": "openid-connect",
-      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "false" },
-      "protocolMappers": [
-        {
-          "name": "gpuhub-api-audience",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-audience-mapper",
-          "config": {
-            "included.custom.audience": "gpuhub-api",
-            "access.token.claim": "true",
-            "id.token.claim": "false",
-            "introspection.token.claim": "true"
-          }
-        }
-      ]
-    }
-  ],
   "clients": [
     {
       "clientId": "gpuhub-cli",
@@ -50,8 +30,19 @@
         "oauth2.device.authorization.grant.enabled": "true",
         "access.token.lifespan": "900"
       },
-      "defaultClientScopes": ["basic", "roles", "gpuhub-api"],
-      "optionalClientScopes": ["offline_access", "profile", "email"]
+      "protocolMappers": [
+        {
+          "name": "gpuhub-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "gpuhub-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
     }
   ]
 }

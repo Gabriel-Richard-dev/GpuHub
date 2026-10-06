@@ -30,11 +30,10 @@ services:
               count: all
               capabilities: [gpu]
 
-  # Porta de entrada: TLS + autenticação por conta nomeada na frente da Jobs
-  # API. Sem isso, o hub é execução de código arbitrário pra quem alcança a
-  # porta 8265 — o Ray não tem autenticação própria.
+  # Porta de entrada: TLS + validação de JWT do Keycloak na frente da Jobs API.
+  # Sem isso, o hub é execução de código arbitrário pra quem alcança a 8265.
   caddy:
-    image: caddy:2-alpine
+    image: gpuhub-caddy:jwt
     container_name: gpuhub-caddy
     restart: unless-stopped
     network_mode: host
@@ -58,7 +57,30 @@ services:
       - caddy_config:/config
       - caddy_logs:/var/log/caddy
 
+  # Drive web do /data (estilo Google Drive). Roda como uid 2000 + grupos
+  # lab/vigia (mesmo dono que o hub usa) pra ler/escrever /data respeitando as
+  # permissões. Escuta só em 127.0.0.1:8090 — quem entra, entra pelo Caddy (/files).
+  filebrowser:
+    image: filebrowser/filebrowser:v2.32.0
+    container_name: gpuhub-filebrowser
+    restart: unless-stopped
+    network_mode: host
+    user: "2000:2000"
+    group_add:
+      - "1009"   # lab
+      - "1003"   # vigia
+    environment:
+      FB_ADDRESS: "127.0.0.1"
+      FB_PORT: "8090"
+      FB_BASEURL: "/files"
+      FB_ROOT: "/data"
+      FB_DATABASE: "/config/filebrowser.db"
+    volumes:
+      - /data:/data:rw
+      - fb_config:/config
+
 volumes:
   caddy_data:
   caddy_config:
   caddy_logs:
+  fb_config:

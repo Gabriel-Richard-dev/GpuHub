@@ -25,14 +25,22 @@
 		file_server
 	}
 
-	# --- NOVO: Keycloak faz a própria auth; nada de JWT aqui ---
+	# --- Keycloak faz a própria auth; nada de JWT aqui ---
 	handle /auth/* {
-		# Console admin e realm master NAO vão pela porta da frente: administração
-		# só por loopback (kcadm) ou túnel SSH. Fecha um alvo a mais, sobretudo
-		# quando isso virar público.
-		@kcadmin path /auth/admin/* /auth/realms/master /auth/realms/master/*
-		respond @kcadmin "admin console indisponivel por aqui" 403
+		# Console admin + realm master só da rede do campus (gestão de usuários
+		# pela web). Fora do campus -> 403. ANTES DE EXPOR PUBLICO: apertar isso
+		# (só a rede de admin, ou túnel), pois vira alvo na internet.
+		@kcadmin {
+			path /auth/admin/* /auth/realms/master /auth/realms/master/*
+			not remote_ip 10.50.0.0/16 127.0.0.1/8 ::1
+		}
+		respond @kcadmin "admin console: so na rede do campus" 403
 		reverse_proxy 127.0.0.1:8080
+	}
+
+	# --- Drive web (Filebrowser): faz a propria auth, sem JWT aqui ---
+	handle /files/* {
+		reverse_proxy 127.0.0.1:8090
 	}
 
 	# --- resto: valida o Bearer JWT do Keycloak, checa papel por método, proxy pro Ray ---

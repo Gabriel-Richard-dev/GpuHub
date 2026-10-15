@@ -22,13 +22,14 @@ services:
     environment:
       # O Ray nasce em 127.0.0.1: quem entra de fora entra pelo caddy.
       GPUHUB_DASHBOARD_HOST: "127.0.0.1"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # GPU via CDI (Container Device Interface), nao pelo caminho legado.
+    # Motivo: com o device-request/hook legado em cgroupv2, um `systemctl
+    # daemon-reload` zera o allowlist de devices do container rodando e ele
+    # perde a GPU ("Failed to initialize NVML") ate ser reiniciado. Pelo CDI
+    # o device vira first-class conhecido pelo Docker, reaplicado no reload.
+    # Spec: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+    devices:
+      - "nvidia.com/gpu=all"
 
   # Porta de entrada: TLS + validação de JWT do Keycloak na frente da Jobs API.
   # Sem isso, o hub é execução de código arbitrário pra quem alcança a 8265.

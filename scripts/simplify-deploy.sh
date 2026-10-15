@@ -4,7 +4,7 @@
 set -uo pipefail
 cd ~/GpuHub/docker
 
-rollback() { echo "!!! ROLLBACK do Caddy"; cp Caddyfile.pre-drive.bak Caddyfile; docker compose up -d --no-deps caddy 2>&1 | tail -3; }
+rollback() { echo "!!! ROLLBACK do Caddy"; cp Caddyfile.pre-drive.bak Caddyfile; docker compose up -d --no-deps --force-recreate caddy 2>&1 | tail -3; }
 
 echo "== 1. volume do filebrowser gravavel pelo uid 2000 =="
 docker volume create docker_fb_config >/dev/null
@@ -20,7 +20,7 @@ cp Caddyfile Caddyfile.pre-drive.bak
 cp Caddyfile.jwt Caddyfile
 
 echo "== 4. sobe caddy (novo) + filebrowser =="
-docker compose up -d --no-deps caddy filebrowser 2>&1 | tail -6
+docker compose up -d --no-deps --force-recreate caddy filebrowser 2>&1 | tail -6
 sleep 6
 
 echo "== 5. verificacao =="

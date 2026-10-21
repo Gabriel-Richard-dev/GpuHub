@@ -9,3 +9,6 @@ dist/
 .env
 docker/caddy/users.caddy
 keycloak/.env
+
+# backups de swap do cutover
+*.bak

@@ -7,30 +7,25 @@ recurso de cluster; por cima, um proxy com TLS e conta por pessoa.
 
 ## Pra quem vai usar (máquina de dev)
 
-Instala o cliente uma vez:
+> **Guia completo (usuário e admin):** [`docs/GUIA-DE-USO.md`](docs/GUIA-DE-USO.md).
+
+Instala o cliente uma vez (sem sudo, sem clonar o repo) e faz login:
 
 ```bash
-uv venv --python 3.11 ~/.gpuhub-venv
-uv pip install --python ~/.gpuhub-venv/bin/python 'ray[default]==2.57.0'
-export PATH="$HOME/.gpuhub-venv/bin:$PATH"   # põe no ~/.bashrc
-
-curl -fsSL https://raw.githubusercontent.com/Gabriel-Richard-dev/GpuHub/master/bin/gpuhub \
-  -o ~/.local/bin/gpuhub && chmod +x ~/.local/bin/gpuhub
+curl -fsSLk https://gpuhub.local/install | bash   # venv + Python 3.11 + Ray + CLI
+gpuhub login                                       # abre uma URL pra aprovar no navegador
 ```
 
-Configura (pede a senha que o admin do hub te passou):
-
-```bash
-gpuhub login <seu-nome>
-```
-
-E roda:
+O `login` é device-flow do Keycloak: o CLI mostra uma URL e um código, você
+aprova no navegador com sua conta do hub, e o token fica guardado (renova
+sozinho). Depois:
 
 ```bash
 gpuhub submit train/seu_treino.py     # manda e acompanha o log
 gpuhub queue                          # o que roda e o que espera
 gpuhub logs <job-id>
 gpuhub stop <job-id>
+gpuhub whoami                         # quem você é e seus papéis
 ```
 
 O script de treino é um `.py` normal — nenhuma linha de código específico de
@@ -39,9 +34,9 @@ GPU hub. Ele roda no hub, com a GPU inteira pra ele.
 Duas coisas que economizam dor de cabeça:
 
 - **Dataset não vai junto com o código.** A pasta do script sobe inteira por
-  HTTP a cada submit. Dados grandes ficam em `/mnt/pesquisa` no hub (o
-  container monta esse caminho), e o script lê de lá. O `gpuhub submit` avisa
-  se a pasta passar de 50 MB.
+  HTTP a cada submit. Dados grandes ficam em `/data` no hub (navegável pelo
+  drive web em `/files/`), e o script lê de lá. O `gpuhub submit` avisa se a
+  pasta passar de 50 MB.
 - **Um treino por vez.** Com uma GPU só, o segundo job espera o primeiro
   terminar — isso é a fila funcionando, não travamento. `gpuhub queue` mostra
   a ordem.
@@ -52,7 +47,9 @@ autenticado. Quem precisar dele usa túnel SSH até o hub.
 ## Como está montado
 
 ```
-dev ──HTTPS + login──> Caddy :443 ──localhost──> Ray Jobs API :8265 ──> GPU
+dev ──HTTPS + Bearer JWT──> Caddy :443 ──┬─ /         → Ray Jobs API 127.0.0.1:8265 → GPU
+                                         ├─ /auth/*   → Keycloak 127.0.0.1:8080 (realm lab)
+                                         └─ /files/*  → Filebrowser 127.0.0.1:8090 (/data)
 ```
 
 Só o Caddy escuta na rede. Isso não é enfeite: **a Jobs API do Ray não tem
@@ -61,18 +58,24 @@ na máquina. Tem varredura em massa procurando exatamente essa porta aberta.
 Por isso, neste repo:
 
 - o Ray nasce em `127.0.0.1` (`GPUHUB_DASHBOARD_HOST`)
-- o container roda como usuário comum (uid 2000), não como root
+- o container roda como usuário comum (uid 2000), não como root; a GPU entra via
+  **CDI** (`nvidia.com/gpu=all`), que sobrevive a `systemctl daemon-reload`
 - o firewall fecha 6379/8265/10001 explicitamente
-- cada pessoa tem conta própria, e o log do Caddy registra quem submeteu
+- o Caddy valida o **JWT do Keycloak** (realm `lab`, papéis por método) e
+  registra quem submeteu
 
 ## Setup do hub (primeira vez)
 
 ```bash
-cp docker/.env.example docker/.env      # revise o endereço e o TLS
+cp docker/.env.example docker/.env                          # revise o endereço e o TLS
 sudo ./scripts/install_host.sh --users alice,bob --firewall
-docker compose -f docker/docker-compose.yml up --build -d
-./scripts/gpuhub-user.sh add alice
+docker compose -f docker/docker-compose.yml up --build -d    # Ray + Caddy + Filebrowser
+(cd keycloak && docker compose up -d)                        # Keycloak + Postgres (compose separado)
+./scripts/simplify-deploy.sh                                 # liga o drive /files e o console /auth/admin
 ```
+
+Depois, crie as contas no Keycloak (console `/auth/admin` ou `kcadm`) — veja
+[`docs/GUIA-DE-USO.md`](docs/GUIA-DE-USO.md) § *Admin A*.
 
 O `install_host.sh` faz só o que precisa de root: grupo `gpuhub` e operadores,
 dono de `/mnt/pesquisa`, serviço systemd, avahi na interface certa e (com
@@ -83,14 +86,19 @@ isso tranca quem administra a máquina de fora.
 ## Operação
 
 ```bash
-systemctl start|stop|status gpuhub          # sobe/desce o conjunto
+systemctl start|stop|status gpuhub          # Ray + Caddy + Filebrowser (compose docker/)
 docker compose -f docker/docker-compose.yml logs -f gpuhub
-./scripts/gpuhub-user.sh add|remove|list    # contas
+(cd keycloak && docker compose up -d)       # Keycloak (compose separado, fora do systemd)
+bash scripts/smoke-test.sh                  # valida a plataforma ponta a ponta
+bash scripts/backup.sh                      # backup (Keycloak + filebrowser + configs)
 ```
 
-Quem operou até hoje foi uma conta só (`labnuven`). O `--users` do
-`install_host.sh` existe pra isso não continuar assim: sem mais de uma pessoa
-no grupo `docker`, ninguém reinicia o hub quando quem o montou não está.
+Contas são no Keycloak (console `/auth/admin` ou `kcadm`), não mais no
+`gpuhub-user.sh` — veja [`docs/GUIA-DE-USO.md`](docs/GUIA-DE-USO.md) § *Admin A*.
+
+Quem opera precisa estar no grupo `docker`. O `--users` do `install_host.sh`
+cuida disso: sem mais de uma pessoa no grupo, ninguém reinicia o hub quando
+quem o montou não está.
 
 ## Rede: campus hoje, público depois
 
@@ -164,16 +172,25 @@ pra faixa onde os workers vivem, não um redesenho.
 
 ```
 bin/
-  gpuhub                                    # cliente que o lab usa
+  gpuhub                                    # cliente que o lab usa (login device-flow)
+docs/
+  GUIA-DE-USO.md                            # guia completo (usuário + admin)
 scripts/
   install_host.sh                           # a parte que precisa de root
-  gpuhub-user.sh                            # contas
+  install_dev.sh                            # instalador da máquina de dev (servido em /install)
+  simplify-deploy.sh                        # liga o drive /files + console /auth/admin
+  backup.sh, smoke-test.sh                  # backup diário e validação ponta a ponta
+  gpuhub-user.sh                            # LEGADO (contas basic_auth; hoje é Keycloak)
   setup_hub.sh, start_hub.sh, stop_hub.sh   # caminho bare-metal (sem Docker)
   start_hub_docker.sh                       # entrypoint do container
-  lib_hub_ip.sh                             # descoberta do IP, usada pelos dois
+  lib_hub_ip.sh                             # descoberta do IP
 docker/
-  Dockerfile.hub, docker-compose.yml
+  Dockerfile.hub, Dockerfile.caddy
+  docker-compose.yml                        # Ray + Caddy(JWT) + Filebrowser
   Caddyfile, .env.example                   # porta de entrada e endereço
+keycloak/
+  docker-compose.yml, realm/lab-realm.json  # IdP central (realm lab)
+  NEXT-CUTOVER.md                           # como o basic_auth virou Keycloak
 systemd/
   gpuhub.service
 ```
